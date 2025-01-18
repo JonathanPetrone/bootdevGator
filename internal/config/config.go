@@ -11,13 +11,51 @@ type Config struct {
 	Current_user_name string `json:"current_user_name"`
 }
 
-const configFileName = ".gatorconfig.json"
-const userName = "Jonathan"
+func getConfigPath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return homeDir + "/.gatorconfig.json", nil
+}
 
-func SetUser(c *Config) error {
-	c.Current_user_name = userName
+func ReadConfig(c *Config) error {
+	configPath, err := getConfigPath()
+	if err != nil {
+		return err
+	}
 
-	file, err := os.OpenFile(configFileName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	// Try to open the file
+	file, err := os.Open(configPath)
+	if err != nil {
+		// If the file doesn't exist, create it with default values
+		if os.IsNotExist(err) {
+			// Initialize with default values
+			c.Db_url = ""
+			c.Current_user_name = ""
+			// Write the default config
+			return WriteConfig(c)
+		}
+		return err
+	}
+	defer file.Close()
+
+	// If file exists, decode it
+	err = json.NewDecoder(file).Decode(c)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func WriteConfig(c *Config) error {
+	configPath, err := getConfigPath()
+	if err != nil {
+		return err
+	}
+
+	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		fmt.Println("Error:", err)
 		return err
@@ -36,26 +74,6 @@ func SetUser(c *Config) error {
 	}
 
 	fmt.Println("Config written to file successfully")
-	return nil
-}
-
-func ReadConfig(c *Config) error {
-	file, err := os.Open(configFileName)
-	if err != nil {
-		fmt.Println("Error:", err)
-		return err
-	}
-	fmt.Println("read")
-
-	defer file.Close()
-
-	err = json.NewDecoder(file).Decode(&c)
-	if err != nil {
-		fmt.Println("Error decoding JSON:", err)
-		return err
-	}
-
-	fmt.Printf("Config: %+v\n", c)
 
 	return nil
 }
