@@ -114,6 +114,36 @@ func handlerRegister(s *state, cmd command) error {
 	return nil
 }
 
+func handlerResetUsers(s *state, cmd command) error {
+	err := s.db.ResetUsers(context.Background())
+	if err != nil {
+		fmt.Println("Failed to reset users", err)
+		return err
+	}
+
+	s.configFile.Current_user_name = ""
+
+	return nil
+}
+
+func handlerGetUsers(s *state, cmd command) error {
+	users, err := s.db.GetUsers(context.Background())
+	if err != nil {
+		fmt.Println("Failed to get users", err)
+		return err
+	}
+
+	for user := range users {
+		if users[user].Name == s.configFile.Current_user_name {
+			fmt.Printf("* %s (current)\n", users[user].Name)
+		} else {
+			fmt.Printf("* %s\n", users[user].Name)
+		}
+	}
+
+	return nil
+}
+
 func main() {
 
 	// initialize configfile
@@ -123,12 +153,13 @@ func main() {
 	err := configGator.ReadConfig(c)
 	if err != nil {
 		fmt.Println("Failed to read config:", err)
-		return
+		os.Exit(1)
 	}
 
 	db, err := sql.Open("postgres", c.Db_url)
 	if err != nil {
-		// handle error
+		fmt.Println("Failed to connect to database:", err)
+		os.Exit(1)
 	}
 
 	dbQueries := database.New(db)
@@ -146,6 +177,8 @@ func main() {
 
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
+	cmds.register("reset", handlerResetUsers)
+	cmds.register("users", handlerGetUsers)
 
 	if len(os.Args) < 2 {
 		fmt.Println("not enough arguments")
