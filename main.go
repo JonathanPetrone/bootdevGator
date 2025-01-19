@@ -144,6 +144,69 @@ func handlerGetUsers(s *state, cmd command) error {
 	return nil
 }
 
+func handlerAgg(s *state, cmd command) error {
+	ctx := context.Background()
+	url := "https://www.wagslane.dev/index.xml"
+	feed, err := fetchFeed(ctx, url)
+	if err != nil {
+		return err
+	}
+	// Print the feed struct somehow
+	fmt.Printf("Struct contents: %+v\n", feed)
+	return nil
+}
+
+func handlerAddFeed(s *state, cmd command) error {
+	if len(cmd.args) != 2 {
+		return fmt.Errorf("expected 2 arguments: name and url")
+	}
+
+	name := cmd.args[0]
+	url := cmd.args[1]
+
+	current_user := s.configFile.Current_user_name
+	user, err := s.db.GetUser(context.Background(), current_user)
+	if err != nil {
+		return err
+	}
+
+	feed, err := s.db.CreateFeed(context.Background(), database.CreateFeedParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Name:      name,
+		Url:       url,
+		UserID:    user.ID,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Feed created successfully:\n")
+	fmt.Printf("  Name: %s\n", feed.Name)
+	fmt.Printf("  URL: %s\n", feed.Url)
+	fmt.Printf("  ID: %s\n", feed.ID)
+
+	return nil
+}
+
+func handlerGetFeeds(s *state, cmd command) error {
+	feeds, err := s.db.GetFeeds(context.Background())
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("List of Feeds:")
+	for i := range feeds {
+		fmt.Printf("  Name: %s\n", feeds[i].Name)
+		fmt.Printf("  URL: %s\n", feeds[i].Url)
+		fmt.Printf("  Added by: %s\n", feeds[i].Username)
+	}
+
+	return nil
+}
+
 func main() {
 
 	// initialize configfile
@@ -179,6 +242,9 @@ func main() {
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerResetUsers)
 	cmds.register("users", handlerGetUsers)
+	cmds.register("agg", handlerAgg)
+	cmds.register("addfeed", handlerAddFeed)
+	cmds.register("feeds", handlerGetFeeds)
 
 	if len(os.Args) < 2 {
 		fmt.Println("not enough arguments")
@@ -196,5 +262,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Final Config: %+v\n", c)
+	//fmt.Printf("Final Config: %+v\n", c)
 }
