@@ -4,14 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/xml"
-	"fmt"
 	"github/jonathanpetrone/bootdevBlogAgg/internal/database"
 	"html"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type RSSFeed struct {
@@ -67,34 +68,6 @@ func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	return feed, nil
 }
 
-func fetchRSSFeed(feedUrl string) (*RSSFeed, error) {
-	// Fetch the RSS feed using an HTTP client
-	resp, err := http.Get(feedUrl)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch RSS feed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Check for a successful HTTP status
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("non-OK HTTP status: %d", resp.StatusCode)
-	}
-
-	// Read the response body into a byte slice
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %v", err)
-	}
-
-	// Parse (unmarshal) the XML into the RSSFeed struct
-	var feed RSSFeed
-	if err := xml.Unmarshal(body, &feed); err != nil {
-		return nil, fmt.Errorf("failed to parse RSS feed: %v", err)
-	}
-
-	return &feed, nil
-}
-
 func scrapeFeeds(ctx context.Context, s *state) error {
 	// Access the database through `s.db` and get the next feed to fetch
 	nextFeed, err := s.db.GetNextFeedToFetch(ctx)
@@ -120,8 +93,43 @@ func scrapeFeeds(ctx context.Context, s *state) error {
 
 	// Log or process the feed items
 	for _, item := range feed.Channel.Item {
-		log.Printf("Post Found: %s (Link: %s)", item.Title, item.Link)
-		// You could add code here to save each `RSSItem` to the database.
+		postID := uuid.New()
+		now := time.Now()
+
+		// Parse the pub date (you'll need to handle different date formats)
+		pubDate, err := time.Parse(time.RFC1123Z, item.PubDate)
+		if err != nil {
+			// Try alternative format if the first one fails
+			pubDate, err = time.Parse(time.RFC1123, item.PubDate)
+			if err != nil {
+				log.Printf("Error parsing date %s: %v", item.PubDate, err)
+				continue
+			}
+		}
+
+		// Try to create the post
+		_, err = s.db.CreatePost(ctx, database.CreatePostParams{
+			ID:        postID,
+			CreatedAt: now,
+			UpdatedAt: now,
+			Title:     item.Title,
+			Url:       item.Link,
+			Description: sql.NullString{
+				String: item.Description,
+				Valid:  item.Description != "",
+			},
+			PublishedAt: pubDate,
+			FeedID:      nextFeed.ID,
+		})
+
+		if err != nil {
+			// Check if it's a duplicate URL error
+			if strings.Contains(err.Error(), "duplicate key") {
+				continue // skip this post and move on
+			}
+			log.Printf("Failed to create post: %v", err)
+			continue
+		}
 	}
 
 	// Mark the feed as fetched in the database

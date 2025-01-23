@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -235,16 +236,37 @@ func handlerFollow(s *state, cmd command, user database.User) error {
 	}
 
 	url := cmd.args[0]
-	feed, err := s.db.GetFeedByURL(context.Background(), url)
+
+	dbFeed, err := s.db.GetFeedByURL(context.Background(), url)
 	if err != nil {
-		return fmt.Errorf("couldn't get feed: %v", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			// Parse and fetch the feed first
+			rssFeed, err := fetchFeed(context.Background(), url)
+			if err != nil {
+				return fmt.Errorf("couldn't fetch feed: %v", err)
+			}
+
+			// Now create the feed using the Channel Title from your RSS structure
+			dbFeed, err = s.db.CreateFeed(context.Background(), database.CreateFeedParams{
+				ID:        uuid.New(),
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+				Name:      rssFeed.Channel.Title,
+				Url:       url,
+				UserID:    user.ID,
+			})
+			if err != nil {
+				return fmt.Errorf("couldn't create feed: %v", err)
+			}
+		} else {
+			return fmt.Errorf("error getting feed: %v", err)
+		}
 	}
 
 	follow, err := s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
 		UserID: user.ID,
-		FeedID: feed.ID,
+		FeedID: dbFeed.ID,
 	})
-
 	if err != nil {
 		return fmt.Errorf("couldn't create follow: %v", err)
 	}
@@ -295,6 +317,36 @@ func handlerUnfollow(s *state, cmd command, user database.User) error {
 		return fmt.Errorf("failed to unfollow the feed: %v", err)
 	}
 
+	return nil
+}
+
+func handlerBrowse(s *state, cmd command, user database.User) error {
+	limit := 2 // default limit
+
+	if len(cmd.args) > 0 {
+		parsedLimit, err := strconv.Atoi(cmd.args[0])
+		if err != nil {
+			return fmt.Errorf("invalid limit: %v", err)
+		}
+		limit = parsedLimit
+	}
+
+	posts, err := s.db.GetPostsForUser(context.Background(), database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  int32(limit),
+	})
+
+	if err != nil {
+		return fmt.Errorf("couldn't get posts: %v", err)
+	}
+
+	for _, post := range posts {
+		fmt.Printf("\nTitle: %s\n", post.Title)
+		fmt.Printf("Description: %s\n", post.Description.String)
+		fmt.Printf("URL: %s\n", post.Url)
+		fmt.Printf("Published: %v\n", post.PublishedAt)
+		fmt.Println("----------------------")
+	}
 	return nil
 }
 
@@ -349,6 +401,7 @@ func main() {
 	cmds.register("follow", middlewareLoggedIn(handlerFollow))
 	cmds.register("following", middlewareLoggedIn(handlerFollowing))
 	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
+	cmds.register("browse", middlewareLoggedIn(handlerBrowse))
 
 	if len(os.Args) < 2 {
 		fmt.Println("not enough arguments")
