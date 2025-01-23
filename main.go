@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -146,14 +147,31 @@ func handlerGetUsers(s *state, cmd command) error {
 
 func handlerAgg(s *state, cmd command) error {
 	ctx := context.Background()
-	url := "https://www.wagslane.dev/index.xml"
-	feed, err := fetchFeed(ctx, url)
-	if err != nil {
-		return err
+
+	// Parse the interval from the command argument (e.g., "1m", "30s")
+	if len(cmd.args) == 0 {
+		return fmt.Errorf("time interval argument is required")
 	}
-	// Print the feed struct somehow
-	fmt.Printf("Struct contents: %+v\n", feed)
-	return nil
+	timeBetweenRequests, err := time.ParseDuration(cmd.args[0])
+	if err != nil {
+		return fmt.Errorf("invalid time duration: %v", err)
+	}
+
+	fmt.Printf("Collecting feeds every %s\n", timeBetweenRequests)
+
+	// Set up a ticker to scrape feeds periodically
+	ticker := time.NewTicker(timeBetweenRequests)
+	defer ticker.Stop()
+
+	for {
+		// Call scrapeFeeds every time the ticker ticks
+		if err := scrapeFeeds(ctx, s); err != nil {
+			log.Printf("Error during feed scraping: %v", err)
+		}
+
+		// Wait for the next tick or allow for a Ctrl+C to stop the loop
+		<-ticker.C
+	}
 }
 
 func handlerAddFeed(s *state, cmd command, user database.User) error {
